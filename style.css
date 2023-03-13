@@ -37,7 +37,7 @@ body {
 #stop {
   font-size: 250px;
   font-weight: bold;
-  color: red;
+  color: rgb(255, 255, 255);
   text-align: center;
   margin-top: 100px;
   display: none;
@@ -45,6 +45,8 @@ body {
   top: 35%;
   left: 50%;
   transform: translate(-50%, -50%);
+  border: 10px solid red;
+  background-color: red;
 }
 #generate {
   padding: 10px 20px;
