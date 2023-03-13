@@ -51,3 +51,9 @@ button.addEventListener("click", function() {
 closeButton.addEventListener("click", function() {
   window.close();
 });
+
+document.addEventListener("keydown", function(event) {
+  if (event.code === "Enter") {
+    button.click();
+  }
+});
