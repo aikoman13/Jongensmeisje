@@ -35,7 +35,7 @@ button.addEventListener("click", function() {
 
   setTimeout(() => {
     clearInterval(timer);
-    timerDisplay.textContent = "10";
+    timerDisplay.textContent = "100";
     countDownTimer = setInterval(() => {
       timerDisplay.textContent = parseInt(timerDisplay.textContent) - 1;
       if (timerDisplay.textContent == 0) {
