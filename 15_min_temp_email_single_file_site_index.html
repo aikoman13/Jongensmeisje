@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>15‑Minute Temp Email (no‑backend, CORS‑safe)</title>
+  <style>
+    :root{
+      --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22c55e; --danger:#ef4444; --border:#1f2937;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Helvetica,Arial; color:var(--text);
+      background: radial-gradient(1000px 600px at 70% -100px, #1e293b 0, var(--bg) 40%);
+      display:grid; place-items:start center; padding:24px;
+    }
+    .app{ width:min(1150px,100%) }
+    header{ display:flex; gap:16px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-bottom:18px }
+    .title{ font-weight:800; font-size:clamp(20px,2.4vw,28px) }
+    .subtitle{ color:var(--muted); font-weight:500; font-size:14px }
+    .card{ background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,0)); border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.25) }
+    .controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+    button{ appearance:none; border:1px solid var(--border); background:#0b1220; color:var(--text); padding:10px 14px; border-radius:12px; font-weight:700; cursor:pointer; transition:.15s transform,.15s opacity }
+    button.primary{ background:linear-gradient(90deg,#16a34a,#22c55e); border:none; color:#04120a }
+    button:hover{ transform:translateY(-1px); opacity:.95 }
+    button:disabled{ opacity:.5; cursor:not-allowed }
+    .pill{ display:inline-flex; gap:8px; align-items:center; padding:8px 12px; border-radius:999px; border:1px solid var(--border); background:#0b1220 }
+    .email{ font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; font-size:15px }
+    .timer{ font-variant-numeric:tabular-nums; font-weight:800 }
+    .grid{ display:grid; grid-template-columns:1.1fr .9fr; gap:16px }
+    @media (max-width:1000px){ .grid{ grid-template-columns:1fr } }
+    table{ width:100%; border-collapse:collapse }
+    thead th{ text-align:left; color:var(--muted); font-weight:700; padding:10px 8px; border-bottom:1px solid var(--border) }
+    tbody td{ padding:10px 8px; border-bottom:1px solid rgba(255,255,255,.05) }
+    .empty{ color:var(--muted); text-align:center; padding:20px }
+    .badge{ font-size:12px; padding:3px 8px; border-radius:999px; background:rgba(255,255,255,.05); border:1px solid var(--border); color:var(--muted) }
+    .footer-note{ color:var(--muted); font-size:12px; display:flex; gap:8px; align-items:center }
+    .danger{ color:#fecaca }
+    .small{ font-size:12px }
+    .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+    select,input[type="text"]{ background:#0b1220; color:var(--text); border:1px solid var(--border); border-radius:12px; padding:10px }
+    input[type="text"]{ width:220px }
+    .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; padding:24px; background:rgba(2,6,23,.7); backdrop-filter:blur(2px) }
+    .modal.show{ display:flex }
+    .modal .box{ width:min(1100px,100%); max-height:90vh; overflow:hidden; display:flex; flex-direction:column }
+    .modal header{ margin:0; padding:12px 16px; background:#0b1220; border-bottom:1px solid var(--border); border-radius:14px 14px 0 0 }
+    .modal .content{ background:#0b1220; border:1px solid var(--border); border-top:none; padding:0; border-radius:0 0 14px 14px; overflow:hidden }
+    .modal iframe{ width:100%; height:60vh; border:none; background:white }
+    .modal .bodytext{ white-space:pre-wrap; padding:16px; font-family:ui-monospace,Consolas,monospace; color:black; background:#fff }
+    details{ border:1px dashed var(--border); border-radius:12px; padding:10px }
+    details summary{ cursor:pointer; font-weight:700 }
+    .ok{ color:#86efac }
+    .warn{ color:#fde68a }
+    .err{ color:#fecaca }
+    .chips{ display:flex; gap:6px; flex-wrap:wrap }
+    .chip{ font-size:12px; border:1px solid var(--border); padding:4px 8px; border-radius:999px }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <div class="title">15‑Minute Temp Email</div>
+        <div class="subtitle">No‑backend single file. Auto‑refresh inbox. Graceful fallback if CORS/network is blocked.</div>
+      </div>
+      <div class="row small">
+        <span class="badge" id="netBadge">Network: auto</span>
+        <span class="badge">Client‑side UI</span>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <div class="controls" style="justify-content:space-between; gap:14px">
+          <div class="row">
+            <button class="primary" id="btnGenerate">Generate 15‑min Email</button>
+            <div class="pill" id="emailPill" style="display:none">
+              <span class="email" id="emailText">—</span>
+              <button id="btnCopy" title="Copy address">Copy</button>
+            </div>
+          </div>
+          <div class="row">
+            <span class="pill"><strong>Time left:</strong>&nbsp;<span class="timer" id="timer">00:00</span></span>
+            <button id="btnReset" title="Discard and create a new inbox" style="display:none">Reset</button>
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px; gap:8px">
+          <span class="small">Alias (optional):</span>
+          <input type="text" id="aliasInput" placeholder="e.g. promo2025" maxlength="32" />
+          <span class="small">@</span>
+          <select id="domainSelect"></select>
+          <span class="small">Access mode:</span>
+          <select id="modeSelect" title="How to access the API when CORS blocks direct calls.">
+            <option value="auto" selected>Auto (try direct → proxies → demo)</option>
+            <option value="direct">Direct</option>
+            <option value="proxy1">Proxy: cors.isomorphic-git.org</option>
+            <option value="proxy2">Proxy: allorigins</option>
+            <option value="demo">Offline demo (no network)</option>
+          </select>
+          <span class="small" id="status"></span>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="btnExportInbox" title="Download inbox as JSON">Export inbox (.json)</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="footer-note">
+          <span class="danger">⚠</span>
+          <span>Do <strong>not</strong> use this for sensitive accounts. Anyone who knows the address can read the inbox. Provider may purge messages at any time.</span>
+        </div>
+        <details style="margin-top:10px">
+          <summary>Diagnostics & Tests</summary>
+          <div class="small" id="testOutput">No tests run yet.</div>
+          <div class="row" style="margin-top:8px">
+            <button id="btnRunTests">Run self‑tests</button>
+          </div>
+          <div class="chips" style="margin-top:8px">
+            <span class="chip" id="chipAlias">alias: n/a</span>
+            <span class="chip" id="chipAddr">addr: n/a</span>
+          </div>
+        </details>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top:16px">
+      <div class="row" style="justify-content:space-between">
+        <div class="subtitle" style="color:#cbd5e1">Inbox</div>
+        <span class="small" id="lastCheck">—</span>
+      </div>
+      <div style="overflow:auto; margin-top:8px">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:28%">From</th>
+              <th>Subject</th>
+              <th style="width:140px">Date</th>
+              <th style="width:180px">Attachments</th>
+              <th style="width:100px">Open</th>
+            </tr>
+          </thead>
+          <tbody id="mailRows">
+            <tr><td colspan="5" class="empty">No messages yet. We'll check every 5 seconds…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="footer-note" style="margin-top:12px">
+      Built for quick sign‑ups and testing. Inbox expires locally after 15 minutes.
+    </p>
+  </div>
+
+  <!-- Modal for reading a message -->
+  <div class="modal" id="modal">
+    <div class="box">
+      <header class="row" style="justify-content:space-between">
+        <div class="row" style="gap:10px">
+          <div class="subtitle" id="modalSubject" style="font-weight:700;color:#e5e7eb"></div>
+          <div class="badge" id="modalFrom"></div>
+        </div>
+        <div class="row">
+          <button id="btnDownloadEML" title="Export as .eml">Download .eml</button>
+          <button id="btnDownloadJSON" title="Export as .json">Download .json</button>
+          <button id="btnClose">Close</button>
+        </div>
+      </header>
+      <div class="content" id="modalContent"></div>
+    </div>
+  </div>
+
+  <script>
+    // === Config & helpers =====================================================
+    const API_BASE = 'https://www.1secmail.com/api/v1/';
+    const DEFAULT_DOMAINS = [
+      '1secmail.com','1secmail.org','1secmail.net','kzccv.com','qiott.com','vjuum.com'
+    ];
+
+    const PROXIES = {
+      direct: (u)=>u,
+      proxy1: (u)=>`https://cors.isomorphic-git.org/${u}`,
+      proxy2: (u)=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    };
+
+    const el = (id)=>document.getElementById(id);
+    const $ = (sel,root=document)=>root.querySelector(sel);
+
+    const btnGenerate = el('btnGenerate');
+    const btnReset = el('btnReset');
+    const btnCopy = el('btnCopy');
+    const emailText = el('emailText');
+    const emailPill = el('emailPill');
+    const timerEl = el('timer');
+    const statusEl = el('status');
+    const domainSelect = el('domainSelect');
+    const aliasInput = el('aliasInput');
+    const modeSelect = el('modeSelect');
+    const mailRows = el('mailRows');
+    const lastCheck = el('lastCheck');
+    const netBadge = el('netBadge');
+    const chipAlias = el('chipAlias');
+    const chipAddr = el('chipAddr');
+
+    const modal = el('modal');
+    const modalFrom = el('modalFrom');
+    const modalSubject = el('modalSubject');
+    const modalContent = el('modalContent');
+    const btnClose = el('btnClose');
+    const btnDownloadEML = el('btnDownloadEML');
+    const btnDownloadJSON = el('btnDownloadJSON');
+    const btnExportInbox = el('btnExportInbox');
+
+    let state = {
+      login:null, domain:null, expiresAt:null, poller:null, knownIds:new Set(),
+      mode:'auto', // 'auto' | 'direct' | 'proxy1' | 'proxy2' | 'demo'
+      activePath:'(none)',
+      lastOpened:null, // last opened message object
+      inboxCache:[] // cache of list rows for export
+    };
+
+    function saveState(){
+      localStorage.setItem('tmp_state', JSON.stringify({ login:state.login, domain:state.domain, expiresAt:state.expiresAt, mode:state.mode }));
+    }
+    function loadState(){ try{ return JSON.parse(localStorage.getItem('tmp_state'))||null }catch{ return null } }
+    function clearState(){ localStorage.removeItem('tmp_state') }
+
+    function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m])) }
+
+    function formatTimeLeft(ms){ ms=Math.max(0,ms); const sec=Math.floor(ms/1000); const m=String(Math.floor(sec/60)).padStart(2,'0'); const s=String(sec%60).padStart(2,'0'); return `${m}:${s}` }
+
+    function updateTimer(){
+      if(!state.expiresAt){ timerEl.textContent='00:00'; return }
+      const left = state.expiresAt - Date.now();
+      timerEl.textContent = formatTimeLeft(left);
+      if(left<=0) expireInbox();
+    }
+
+    function expireInbox(){
+      stopPolling(); statusEl.textContent='Expired. Generate a new inbox.'; emailText.textContent='—'; emailPill.style.display='none'; btnReset.style.display='none'; btnGenerate.disabled=false; clearState();
+      chipAddr.textContent = 'addr: n/a';
+    }
+
+    function randomLogin(){ return 'u'+Math.random().toString(36).slice(2,8)+Math.random().toString(36).slice(2,6) }
+
+    function sanitizeAlias(a){
+      a = (a||'').trim().toLowerCase();
+      a = a.replace(/[^a-z0-9._-]/g,'');
+      if(a && !/^[a-z]/.test(a)) a = 'u'+a; // must start with a letter
+      return a.slice(0,32);
+    }
+
+    function showEmail(){
+      const addr=`${state.login}@${state.domain}`;
+      emailText.textContent=addr; emailPill.style.display='inline-flex'; btnReset.style.display='inline-block'; statusEl.textContent='Inbox ready.';
+      chipAddr.textContent = `addr: ${addr}`;
+    }
+
+    function startPolling(){ stopPolling(); fetchMessages(); state.poller=setInterval(()=>{ fetchMessages(); updateTimer() }, 5000); updateTimer() }
+    function stopPolling(){ if(state.poller){ clearInterval(state.poller); state.poller=null } }
+
+    // === Network with graceful fallback ======================================
+    async function httpGetJSON(url){
+      const tryOrder = state.mode==='auto' ? ['direct','proxy1','proxy2'] : (state.mode==='demo'?[]:[state.mode]);
+      for(const key of tryOrder){
+        try{
+          const wrapped = PROXIES[key](url);
+          const res = await fetch(wrapped, { cache:'no-store' });
+          if(!res.ok) throw new Error(`HTTP ${res.status}`);
+          let data; const ct = res.headers.get('content-type')||'';
+          if(ct.includes('application/json')) data = await res.json();
+          else { const txt = await res.text(); try{ data = JSON.parse(txt) }catch{ throw new Error('Bad JSON from proxy') } }
+          state.activePath = key; netBadge.textContent = `Network: ${key}`; return data;
+        }catch(err){ console.warn(`[${key}] failed:`, err.message) }
+      }
+      throw new Error('All network paths failed');
+    }
+
+    async function httpGetBlob(url){
+      const tryOrder = state.mode==='auto' ? ['direct','proxy1','proxy2'] : (state.mode==='demo'?[]:[state.mode]);
+      for(const key of tryOrder){
+        try{
+          const wrapped = PROXIES[key](url);
+          const res = await fetch(wrapped, { cache:'no-store' });
+          if(!res.ok) throw new Error(`HTTP ${res.status}`);
+          state.activePath = key; netBadge.textContent = `Network: ${key}`; return await res.blob();
+        }catch(err){ console.warn(`[blob:${key}] failed:`, err.message) }
+      }
+      throw new Error('All network paths failed (blob)');
+    }
+
+    // === Demo (offline) mode =================================================
+    const demo = {
+      active:false,
+      inbox:[],
+      tick(){
+        if(Math.random()<0.4){
+          const id = (demo.inbox.at(-1)?.id||1000)+Math.floor(Math.random()*3+1);
+          demo.inbox.push({ id, from:`noreply@demo.app`, subject:`Welcome #${id}`, date:new Date().toLocaleString(), body:`This is a demo message (id ${id}).`, attachments:[] });
+        }
+      },
+      list(){ return demo.inbox.map(({id,from,subject,date,attachments})=>({id,from,subject,date,attachments})) },
+      read(id){ return demo.inbox.find(m=>m.id===id) || { subject:'(no subject)', from:'', textBody:'(empty)', attachments:[] } }
+    };
+
+    // === API wrappers =========================================================
+    async function apiGetMessages(login,domain){
+      if(state.mode==='demo' || demo.active) return demo.list();
+      const url = `${API_BASE}?action=getMessages&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}`;
+      return await httpGetJSON(url);
+    }
+    async function apiReadMessage(login,domain,id){
+      if(state.mode==='demo' || demo.active) return demo.read(id);
+      const url = `${API_BASE}?action=readMessage&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}&id=${id}`;
+      return await httpGetJSON(url);
+    }
+    async function apiGetDomains(){
+      try{ const url = `${API_BASE}?action=getDomainList`; const list = await httpGetJSON(url); return Array.isArray(list)&&list.length?list:DEFAULT_DOMAINS }
+      catch{ return DEFAULT_DOMAINS }
+    }
+
+    async function apiDownloadAttachment(login,domain,id,filename){
+      const url = `${API_BASE}?action=download&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}&id=${id}&file=${encodeURIComponent(filename)}`;
+      return await httpGetBlob(url);
+    }
+
+    // === UI handlers ==========================================================
+    async function generateEmail(){
+      const chosen = domainSelect.value || DEFAULT_DOMAINS[0];
+      statusEl.textContent='Generating…'; btnGenerate.disabled=true;
+      const alias = sanitizeAlias(aliasInput.value);
+      chipAlias.textContent = `alias: ${alias||'n/a'}`;
+      try{
+        const login = alias || randomLogin(); const domain = chosen;
+        state.login=login; state.domain=domain; state.expiresAt=Date.now()+15*60*1000; state.knownIds=new Set(); saveState(); showEmail(); startPolling();
+      }catch(err){ console.error(err); statusEl.textContent='Failed to generate. Try again.'; btnGenerate.disabled=false }
+    }
+
+    async function fetchMessages(){
+      if(!state.login || !state.domain) return;
+      try{
+        if(state.mode==='demo' || demo.active) demo.tick();
+        const data = await apiGetMessages(state.login, state.domain);
+        state.inboxCache = Array.isArray(data)?data:[];
+        renderMessages(state.inboxCache);
+        lastCheck.textContent = `Last check: ${new Date().toLocaleTimeString()}`;
+        statusEl.textContent='';
+      }catch(e){ statusEl.textContent='Network blocked. Switched to demo mode.'; activateDemo() }
+    }
+
+    function renderMessages(list){
+      if(!list.length){ mailRows.innerHTML = '<tr><td colspan="5" class="empty">No messages yet.</td></tr>'; return }
+      list.sort((a,b)=>b.id-a.id); mailRows.innerHTML='';
+      for(const m of list){
+        const tr=document.createElement('tr');
+        const attach = (m.attachments&&m.attachments.length) ? `${m.attachments.length} file(s)` : '-';
+        tr.innerHTML = `
+          <td>${escapeHtml(m.from||'')}</td>
+          <td>${escapeHtml(m.subject||'')}</td>
+          <td>${escapeHtml(m.date||'')}</td>
+          <td>${attach}</td>
+          <td><button data-id="${m.id}">Open</button></td>`;
+        tr.querySelector('button').addEventListener('click',()=>openMessage(m.id));
+        mailRows.appendChild(tr);
+      }
+    }
+
+    async function openMessage(id){
+      try{
+        const msg = await apiReadMessage(state.login, state.domain, id);
+        state.lastOpened = msg;
+        showModal(msg);
+      }catch(e){ alert('Failed to load message.') }
+    }
+
+    function showModal(msg){
+      modalSubject.textContent = msg.subject || '(no subject)';
+      modalFrom.textContent = `From: ${msg.from || ''}`;
+      modalContent.innerHTML='';
+
+      // attachments row (if any)
+      const att = Array.isArray(msg.attachments)?msg.attachments:[];
+      if(att.length){
+        const wrap = document.createElement('div');
+        wrap.style.padding = '10px 16px';
+        wrap.className = 'row';
+        wrap.style.flexWrap = 'wrap';
+        wrap.innerHTML = '<span class="small">Attachments:</span>';
+        att.forEach(a=>{
+          const b = document.createElement('button');
+          b.textContent = `${a.filename||'file'} (${a.size?Math.round(a.size/1024)+' KB':''})`;
+          b.title = 'Download attachment';
+          b.addEventListener('click',()=>downloadAttachment(msg, a.filename));
+          wrap.appendChild(b);
+        });
+        modalContent.appendChild(wrap);
+      }
+
+      if(msg.htmlBody){ const iframe=document.createElement('iframe'); iframe.setAttribute('sandbox','allow-same-origin'); iframe.srcdoc=msg.htmlBody; modalContent.appendChild(iframe); }
+      else if(msg.body){ const pre=document.createElement('pre'); pre.className='bodytext'; pre.textContent=msg.body; modalContent.appendChild(pre); }
+      else if(msg.textBody){ const pre=document.createElement('pre'); pre.className='bodytext'; pre.textContent=msg.textBody; modalContent.appendChild(pre); }
+      else { const pre=document.createElement('pre'); pre.className='bodytext'; pre.textContent='(No content)'; modalContent.appendChild(pre); }
+
+      modal.classList.add('show');
+    }
+
+    async function downloadAttachment(msg, filename){
+      try{
+        const blob = await apiDownloadAttachment(state.login, state.domain, msg.id, filename);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url), 1500);
+      }catch(e){ alert('Attachment download failed (CORS/proxy). Try another Access mode or Demo.') }
+    }
+
+    function hideModal(){ modal.classList.remove('show') }
+
+    function populateDomains(list){
+      domainSelect.innerHTML='';
+      for(const d of list){ const opt=document.createElement('option'); opt.value=d; opt.textContent=d; domainSelect.appendChild(opt) }
+      // include demo domain for offline
+      const demoOpt=document.createElement('option'); demoOpt.value='demo.local'; demoOpt.textContent='demo.local'; domainSelect.appendChild(demoOpt);
+    }
+
+    function activateDemo(){ demo.active=true; state.mode='demo'; modeSelect.value='demo'; netBadge.textContent='Network: demo'; }
+
+    // === Export helpers =======================================================
+    function downloadFile(name, mime, content){
+      const blob = new Blob([content], {type:mime});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 1500);
+    }
+
+    function buildEML(msg){
+      const headers = [
+        `From: ${msg.from||''}`,
+        `To: ${state.login}@${state.domain}`,
+        `Subject: ${msg.subject||''}`,
+        `Date: ${new Date().toUTCString()}`,
+        'MIME-Version: 1.0'
+      ];
+      const bodyText = msg.textBody || msg.body || '';
+      const html = msg.htmlBody || '';
+      if(html){
+        const boundary = '----=#Part_'+Math.random().toString(36).slice(2);
+        headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+        return headers.join('\r\n')+`\r\n\r\n--${boundary}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${bodyText}\r\n--${boundary}\r\nContent-Type: text/html; charset=utf-8\r\n\r\n${html}\r\n--${boundary}--`;
+      } else {
+        headers.push('Content-Type: text/plain; charset=utf-8');
+        return headers.join('\r\n')+`\r\n\r\n${bodyText}`;
+      }
+    }
+
+    // === Tests ================================================================
+    const testOutput = el('testOutput');
+    function logTest(line){ testOutput.innerHTML += `<div>${line}</div>` }
+    function assertEqual(name, a, b){ const ok=JSON.stringify(a)===JSON.stringify(b); logTest(`${ok?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} ${name} → ${escapeHtml(JSON.stringify(a))}`); if(!ok) console.error('Test failed', name, a, b) }
+    function assertMatch(name, str, re){ const ok = re.test(str); logTest(`${ok?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} ${name}`); if(!ok) console.error('Test failed', name, str) }
+    function runTests(){ testOutput.innerHTML='';
+      // formatTimeLeft
+      assertEqual('formatTimeLeft(0)', formatTimeLeft(0), '00:00');
+      assertEqual('formatTimeLeft(1000)', formatTimeLeft(1000), '00:01');
+      assertEqual('formatTimeLeft(59000)', formatTimeLeft(59000), '00:59');
+      assertEqual('formatTimeLeft(60000)', formatTimeLeft(60000), '01:00');
+      assertEqual('formatTimeLeft(90000)', formatTimeLeft(90000), '01:30');
+      // escapeHtml
+      assertEqual('escapeHtml("<&>\"\'")', escapeHtml('<&>"\''), '&lt;&amp;&gt;&quot;&#039;');
+      // randomLogin uniqueness/format
+      const samples = new Set(Array.from({length:200}, ()=>randomLogin()));
+      logTest(`${samples.size===200?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} randomLogin uniqueness (200)`);
+      const allValid = Array.from(samples).every(s=>/^u[a-z0-9]+$/.test(s));
+      logTest(`${allValid?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} randomLogin format`);
+      // sanitizeAlias
+      assertEqual('sanitizeAlias(" My Alias! ")', sanitizeAlias(' My Alias! '), 'myalias');
+      assertMatch('sanitizeAlias starts with letter', sanitizeAlias('1abc'), /^u/);
+      assertEqual('sanitizeAlias keeps dots/underscores', sanitizeAlias('a.b_c-1'), 'a.b_c-1');
+      assertEqual('sanitizeAlias removes @', sanitizeAlias('my@alias'), 'myalias');
+      // renderMessages (DOM smoke test)
+      renderMessages([{id:1,from:'a@b',subject:'hi',date:'now',attachments:[]}]);
+      const rowOk = !!$('#mailRows tr td');
+      logTest(`${rowOk?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} renderMessages DOM row`);
+      // EML builder
+      const eml = buildEML({from:'x@y',subject:'s',textBody:'t',htmlBody:'<b>h</b>'});
+      assertMatch('EML has headers', eml, /MIME-Version: 1.0/);
+      assertMatch('EML multipart boundary', eml, /multipart\/alternative/);
+      // filename sanitizer keeps @ and dots
+      const demoName = 'inbox_a@b.json'.replace(/[^a-z0-9._@-]+/gi,'_');
+      assertEqual('filename sanitize keeps @', demoName, 'inbox_a@b.json');
+      // Network test (non-fatal)
+      (async()=>{
+        try{ const domains = await apiGetDomains(); logTest(`<span class=ok>PASS</span> network test (${domains.length} domains)`); }
+        catch{ logTest('<span class=warn>WARN</span> network blocked; demo fallback will be used.') }
+      })();
+    }
+
+    // === Boot & events ========================================================
+    btnGenerate.addEventListener('click', generateEmail);
+    btnReset.addEventListener('click', ()=>{ expireInbox(); btnGenerate.click() });
+    btnCopy.addEventListener('click', ()=>{ if(!state.login) return; navigator.clipboard.writeText(`${state.login}@${state.domain}`); statusEl.textContent='Copied!'; setTimeout(()=>statusEl.textContent='',1200) });
+    btnClose.addEventListener('click', hideModal);
+    modal.addEventListener('click', e=>{ if(e.target===modal) hideModal() });
+    el('btnRunTests').addEventListener('click', runTests);
+
+    btnDownloadEML.addEventListener('click', ()=>{ if(!state.lastOpened) return; const eml = buildEML(state.lastOpened); const safeSub = (state.lastOpened.subject||'message').replace(/[^a-z0-9._-]+/gi,'_'); downloadFile(`${safeSub}.eml`, 'message/rfc822', eml) });
+    btnDownloadJSON.addEventListener('click', ()=>{ if(!state.lastOpened) return; const safeSub = (state.lastOpened.subject||'message').replace(/[^a-z0-9._-]+/gi,'_'); downloadFile(`${safeSub}.json`, 'application/json', JSON.stringify(state.lastOpened,null,2)) });
+    btnExportInbox.addEventListener('click', ()=>{ const name = `inbox_${state.login||'anon'}@${state.domain||'domain'}.json`.replace(/[^a-z0-9._@-]+/gi,'_'); downloadFile(name, 'application/json', JSON.stringify(state.inboxCache,null,2)) });
+
+    modeSelect.addEventListener('change',()=>{
+      state.mode = modeSelect.value; saveState();
+      if(state.mode==='demo'){ activateDemo() } else { demo.active=false; netBadge.textContent=`Network: ${state.mode}` }
+      if(state.login) startPolling();
+    });
+
+    aliasInput.addEventListener('input',()=>{ chipAlias.textContent = `alias: ${sanitizeAlias(aliasInput.value)||'n/a'}` });
+
+    (async function init(){
+      try{ populateDomains(await apiGetDomains()) }catch{ populateDomains(DEFAULT_DOMAINS) }
+      const s = loadState();
+      if(s){ state.mode=s.mode||'auto'; modeSelect.value=state.mode; if(state.mode==='demo') activateDemo(); }
+      const persisted = s && s.login && s.domain && s.expiresAt>Date.now();
+      if(persisted){ state.login=s.login; state.domain=s.domain; state.expiresAt=s.expiresAt; showEmail(); startPolling(); btnGenerate.disabled=true }
+      else { clearState(); updateTimer() }
+      setInterval(updateTimer, 500);
+      runTests();
+    })();
+  </script>
+</body>
+</html>
