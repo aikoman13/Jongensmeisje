@@ -5,17 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>15‑Minute Temp Email (no‑backend, CORS‑safe)</title>
   <style>
-    :root{
-      --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22c55e; --danger:#ef4444; --border:#1f2937;
-    }
+    :root{ --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22c55e; --danger:#ef4444; --border:#1f2937 }
     *{box-sizing:border-box}
     html,body{height:100%}
-    body{
-      margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Helvetica,Arial; color:var(--text);
-      background: radial-gradient(1000px 600px at 70% -100px, #1e293b 0, var(--bg) 40%);
-      display:grid; place-items:start center; padding:24px;
-    }
-    .app{ width:min(1150px,100%) }
+    body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Helvetica,Arial; color:var(--text); background: radial-gradient(1000px 600px at 70% -100px, #1e293b 0, var(--bg) 40%); display:grid; place-items:start center; padding:24px }
+    .app{ width:min(1180px,100%) }
     header{ display:flex; gap:16px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-bottom:18px }
     .title{ font-weight:800; font-size:clamp(20px,2.4vw,28px) }
     .subtitle{ color:var(--muted); font-weight:500; font-size:14px }
@@ -39,8 +33,8 @@
     .danger{ color:#fecaca }
     .small{ font-size:12px }
     .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap }
-    select,input[type="text"]{ background:#0b1220; color:var(--text); border:1px solid var(--border); border-radius:12px; padding:10px }
-    input[type="text"]{ width:220px }
+    select,input[type="text"],input[type="url"],input[type="checkbox"]{ background:#0b1220; color:var(--text); border:1px solid var(--border); border-radius:12px; padding:10px }
+    input[type="text"],input[type="url"]{ width:260px }
     .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; padding:24px; background:rgba(2,6,23,.7); backdrop-filter:blur(2px) }
     .modal.show{ display:flex }
     .modal .box{ width:min(1100px,100%); max-height:90vh; overflow:hidden; display:flex; flex-direction:column }
@@ -55,6 +49,7 @@
     .err{ color:#fecaca }
     .chips{ display:flex; gap:6px; flex-wrap:wrap }
     .chip{ font-size:12px; border:1px solid var(--border); padding:4px 8px; border-radius:999px }
+    .banner{ background:#3b0d0d; border:1px solid #7f1d1d; color:#fecaca; padding:10px 12px; border-radius:12px; margin-top:10px }
   </style>
 </head>
 <body>
@@ -62,7 +57,7 @@
     <header>
       <div>
         <div class="title">15‑Minute Temp Email</div>
-        <div class="subtitle">No‑backend single file. Auto‑refresh inbox. Graceful fallback if CORS/network is blocked.</div>
+        <div class="subtitle">No‑backend single file. Auto‑refresh inbox. Manual control when network blocks access.</div>
       </div>
       <div class="row small">
         <span class="badge" id="netBadge">Network: auto</span>
@@ -90,16 +85,24 @@
           <input type="text" id="aliasInput" placeholder="e.g. promo2025" maxlength="32" />
           <span class="small">@</span>
           <select id="domainSelect"></select>
+        </div>
+        <div class="row" style="margin-top:8px; gap:8px">
           <span class="small">Access mode:</span>
           <select id="modeSelect" title="How to access the API when CORS blocks direct calls.">
-            <option value="auto" selected>Auto (try direct → proxies → demo)</option>
+            <option value="auto" selected>Auto (try direct → proxies)</option>
             <option value="direct">Direct</option>
             <option value="proxy1">Proxy: cors.isomorphic-git.org</option>
-            <option value="proxy2">Proxy: allorigins</option>
-            <option value="demo">Offline demo (no network)</option>
+            <option value="proxy2">Proxy: allorigins (raw)</option>
+            <option value="proxy3">Proxy: thingproxy.freeboard.io</option>
+            <option value="proxy4">Proxy: codetabs</option>
+            <option value="custom">Custom proxy</option>
+            <option value="demo">Offline demo</option>
           </select>
+          <input type="url" id="customProxy" placeholder="Custom proxy prefix… e.g. https://example.com/fetch/" title="If set, will be used when mode=custom. Use {url} to place the original URL if your proxy needs a template." />
+          <label class="small" style="display:flex; align-items:center; gap:8px"><input type="checkbox" id="autoDemo" checked /> Auto‑switch to Demo on total failure</label>
           <span class="small" id="status"></span>
         </div>
+        <div id="errorBanner" class="banner" style="display:none"></div>
         <div class="row" style="margin-top:8px">
           <button id="btnExportInbox" title="Download inbox as JSON">Export inbox (.json)</button>
         </div>
@@ -115,6 +118,7 @@
           <div class="small" id="testOutput">No tests run yet.</div>
           <div class="row" style="margin-top:8px">
             <button id="btnRunTests">Run self‑tests</button>
+            <button id="btnProbe">Probe network paths</button>
           </div>
           <div class="chips" style="margin-top:8px">
             <span class="chip" id="chipAlias">alias: n/a</span>
@@ -173,14 +177,19 @@
   <script>
     // === Config & helpers =====================================================
     const API_BASE = 'https://www.1secmail.com/api/v1/';
-    const DEFAULT_DOMAINS = [
-      '1secmail.com','1secmail.org','1secmail.net','kzccv.com','qiott.com','vjuum.com'
-    ];
+    const DEFAULT_DOMAINS = ['1secmail.com','1secmail.org','1secmail.net','kzccv.com','qiott.com','vjuum.com'];
 
     const PROXIES = {
       direct: (u)=>u,
       proxy1: (u)=>`https://cors.isomorphic-git.org/${u}`,
       proxy2: (u)=>`https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+      proxy3: (u)=>`https://thingproxy.freeboard.io/fetch/${u}`,
+      proxy4: (u)=>`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+      custom: (u)=>{
+        const p = document.getElementById('customProxy').value.trim();
+        if(!p) throw new Error('Custom proxy not set');
+        return p.includes('{url}') ? p.replace('{url}', u) : p + u;
+      }
     };
 
     const el = (id)=>document.getElementById(id);
@@ -196,6 +205,9 @@
     const domainSelect = el('domainSelect');
     const aliasInput = el('aliasInput');
     const modeSelect = el('modeSelect');
+    const customProxy = el('customProxy');
+    const autoDemoChk = el('autoDemo');
+    const errorBanner = el('errorBanner');
     const mailRows = el('mailRows');
     const lastCheck = el('lastCheck');
     const netBadge = el('netBadge');
@@ -211,57 +223,41 @@
     const btnDownloadJSON = el('btnDownloadJSON');
     const btnExportInbox = el('btnExportInbox');
 
+    const btnProbe = el('btnProbe');
+
     let state = {
       login:null, domain:null, expiresAt:null, poller:null, knownIds:new Set(),
-      mode:'auto', // 'auto' | 'direct' | 'proxy1' | 'proxy2' | 'demo'
-      activePath:'(none)',
-      lastOpened:null, // last opened message object
-      inboxCache:[] // cache of list rows for export
+      mode:'auto', // 'auto' | 'direct' | 'proxy1' | 'proxy2' | 'proxy3' | 'proxy4' | 'custom' | 'demo'
+      activePath:'(none)', lastOpened:null, inboxCache:[],
+      lastErrors:[]
     };
 
-    function saveState(){
-      localStorage.setItem('tmp_state', JSON.stringify({ login:state.login, domain:state.domain, expiresAt:state.expiresAt, mode:state.mode }));
-    }
+    function saveState(){ localStorage.setItem('tmp_state', JSON.stringify({ login:state.login, domain:state.domain, expiresAt:state.expiresAt, mode:state.mode, customProxy:customProxy.value, autoDemo:autoDemoChk.checked })) }
     function loadState(){ try{ return JSON.parse(localStorage.getItem('tmp_state'))||null }catch{ return null } }
     function clearState(){ localStorage.removeItem('tmp_state') }
 
     function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m])) }
-
     function formatTimeLeft(ms){ ms=Math.max(0,ms); const sec=Math.floor(ms/1000); const m=String(Math.floor(sec/60)).padStart(2,'0'); const s=String(sec%60).padStart(2,'0'); return `${m}:${s}` }
 
-    function updateTimer(){
-      if(!state.expiresAt){ timerEl.textContent='00:00'; return }
-      const left = state.expiresAt - Date.now();
-      timerEl.textContent = formatTimeLeft(left);
-      if(left<=0) expireInbox();
-    }
+    function updateTimer(){ if(!state.expiresAt){ timerEl.textContent='00:00'; return } const left = state.expiresAt - Date.now(); timerEl.textContent = formatTimeLeft(left); if(left<=0) expireInbox() }
 
-    function expireInbox(){
-      stopPolling(); statusEl.textContent='Expired. Generate a new inbox.'; emailText.textContent='—'; emailPill.style.display='none'; btnReset.style.display='none'; btnGenerate.disabled=false; clearState();
-      chipAddr.textContent = 'addr: n/a';
-    }
+    function expireInbox(){ stopPolling(); statusEl.textContent='Expired. Generate a new inbox.'; emailText.textContent='—'; emailPill.style.display='none'; btnReset.style.display='none'; btnGenerate.disabled=false; clearState(); chipAddr.textContent='addr: n/a' }
 
     function randomLogin(){ return 'u'+Math.random().toString(36).slice(2,8)+Math.random().toString(36).slice(2,6) }
+    function sanitizeAlias(a){ a=(a||'').trim().toLowerCase(); a=a.replace(/[^a-z0-9._-]/g,''); if(a && !/^[a-z]/.test(a)) a='u'+a; return a.slice(0,32) }
 
-    function sanitizeAlias(a){
-      a = (a||'').trim().toLowerCase();
-      a = a.replace(/[^a-z0-9._-]/g,'');
-      if(a && !/^[a-z]/.test(a)) a = 'u'+a; // must start with a letter
-      return a.slice(0,32);
-    }
-
-    function showEmail(){
-      const addr=`${state.login}@${state.domain}`;
-      emailText.textContent=addr; emailPill.style.display='inline-flex'; btnReset.style.display='inline-block'; statusEl.textContent='Inbox ready.';
-      chipAddr.textContent = `addr: ${addr}`;
-    }
+    function showEmail(){ const addr=`${state.login}@${state.domain}`; emailText.textContent=addr; emailPill.style.display='inline-flex'; btnReset.style.display='inline-block'; statusEl.textContent='Inbox ready.'; chipAddr.textContent=`addr: ${addr}` }
 
     function startPolling(){ stopPolling(); fetchMessages(); state.poller=setInterval(()=>{ fetchMessages(); updateTimer() }, 5000); updateTimer() }
     function stopPolling(){ if(state.poller){ clearInterval(state.poller); state.poller=null } }
 
-    // === Network with graceful fallback ======================================
+    function showErrorBanner(text){ errorBanner.textContent=text; errorBanner.style.display='block' }
+    function hideErrorBanner(){ errorBanner.style.display='none' }
+
+    // === Network with detailed fallback ======================================
     async function httpGetJSON(url){
-      const tryOrder = state.mode==='auto' ? ['direct','proxy1','proxy2'] : (state.mode==='demo'?[]:[state.mode]);
+      const tryOrder = state.mode==='auto' ? ['direct','proxy1','proxy2','proxy3','proxy4'] : (state.mode==='demo'?[]:[state.mode]);
+      const errs=[];
       for(const key of tryOrder){
         try{
           const wrapped = PROXIES[key](url);
@@ -270,261 +266,74 @@
           let data; const ct = res.headers.get('content-type')||'';
           if(ct.includes('application/json')) data = await res.json();
           else { const txt = await res.text(); try{ data = JSON.parse(txt) }catch{ throw new Error('Bad JSON from proxy') } }
-          state.activePath = key; netBadge.textContent = `Network: ${key}`; return data;
-        }catch(err){ console.warn(`[${key}] failed:`, err.message) }
+          state.activePath = key; netBadge.textContent = `Network: ${key}`; hideErrorBanner(); return data;
+        }catch(err){ const msg=`[${key}] ${err.message}`; console.warn(msg); errs.push(msg) }
       }
+      state.lastErrors = errs;
       throw new Error('All network paths failed');
     }
 
     async function httpGetBlob(url){
-      const tryOrder = state.mode==='auto' ? ['direct','proxy1','proxy2'] : (state.mode==='demo'?[]:[state.mode]);
+      const tryOrder = state.mode==='auto' ? ['direct','proxy1','proxy2','proxy3','proxy4'] : (state.mode==='demo'?[]:[state.mode]);
+      const errs=[];
       for(const key of tryOrder){
         try{
           const wrapped = PROXIES[key](url);
           const res = await fetch(wrapped, { cache:'no-store' });
           if(!res.ok) throw new Error(`HTTP ${res.status}`);
-          state.activePath = key; netBadge.textContent = `Network: ${key}`; return await res.blob();
-        }catch(err){ console.warn(`[blob:${key}] failed:`, err.message) }
+          state.activePath = key; netBadge.textContent = `Network: ${key}`; hideErrorBanner(); return await res.blob();
+        }catch(err){ const msg=`[blob:${key}] ${err.message}`; console.warn(msg); errs.push(msg) }
       }
+      state.lastErrors = errs;
       throw new Error('All network paths failed (blob)');
     }
 
     // === Demo (offline) mode =================================================
-    const demo = {
-      active:false,
-      inbox:[],
-      tick(){
-        if(Math.random()<0.4){
-          const id = (demo.inbox.at(-1)?.id||1000)+Math.floor(Math.random()*3+1);
-          demo.inbox.push({ id, from:`noreply@demo.app`, subject:`Welcome #${id}`, date:new Date().toLocaleString(), body:`This is a demo message (id ${id}).`, attachments:[] });
-        }
-      },
-      list(){ return demo.inbox.map(({id,from,subject,date,attachments})=>({id,from,subject,date,attachments})) },
-      read(id){ return demo.inbox.find(m=>m.id===id) || { subject:'(no subject)', from:'', textBody:'(empty)', attachments:[] } }
-    };
+    const demo = { active:false, inbox:[], tick(){ if(Math.random()<0.4){ const id=(demo.inbox.at(-1)?.id||1000)+Math.floor(Math.random()*3+1); demo.inbox.push({ id, from:`noreply@demo.app`, subject:`Welcome #${id}`, date:new Date().toLocaleString(), body:`This is a demo message (id ${id}).`, attachments:[] }) } }, list(){ return demo.inbox.map(({id,from,subject,date,attachments})=>({id,from,subject,date,attachments})) }, read(id){ return demo.inbox.find(m=>m.id===id)||{ subject:'(no subject)', from:'', textBody:'(empty)', attachments:[] } } };
 
     // === API wrappers =========================================================
-    async function apiGetMessages(login,domain){
-      if(state.mode==='demo' || demo.active) return demo.list();
-      const url = `${API_BASE}?action=getMessages&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}`;
-      return await httpGetJSON(url);
-    }
-    async function apiReadMessage(login,domain,id){
-      if(state.mode==='demo' || demo.active) return demo.read(id);
-      const url = `${API_BASE}?action=readMessage&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}&id=${id}`;
-      return await httpGetJSON(url);
-    }
-    async function apiGetDomains(){
-      try{ const url = `${API_BASE}?action=getDomainList`; const list = await httpGetJSON(url); return Array.isArray(list)&&list.length?list:DEFAULT_DOMAINS }
-      catch{ return DEFAULT_DOMAINS }
-    }
-
-    async function apiDownloadAttachment(login,domain,id,filename){
-      const url = `${API_BASE}?action=download&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}&id=${id}&file=${encodeURIComponent(filename)}`;
-      return await httpGetBlob(url);
-    }
+    async function apiGetMessages(login,domain){ if(state.mode==='demo' || demo.active) return demo.list(); const url = `${API_BASE}?action=getMessages&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}`; return await httpGetJSON(url) }
+    async function apiReadMessage(login,domain,id){ if(state.mode==='demo' || demo.active) return demo.read(id); const url = `${API_BASE}?action=readMessage&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}&id=${id}`; return await httpGetJSON(url) }
+    async function apiGetDomains(){ try{ const url = `${API_BASE}?action=getDomainList`; const list = await httpGetJSON(url); return Array.isArray(list)&&list.length?list:DEFAULT_DOMAINS }catch{ return DEFAULT_DOMAINS } }
+    async function apiDownloadAttachment(login,domain,id,filename){ const url = `${API_BASE}?action=download&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}&id=${id}&file=${encodeURIComponent(filename)}`; return await httpGetBlob(url) }
 
     // === UI handlers ==========================================================
-    async function generateEmail(){
-      const chosen = domainSelect.value || DEFAULT_DOMAINS[0];
-      statusEl.textContent='Generating…'; btnGenerate.disabled=true;
-      const alias = sanitizeAlias(aliasInput.value);
-      chipAlias.textContent = `alias: ${alias||'n/a'}`;
-      try{
-        const login = alias || randomLogin(); const domain = chosen;
-        state.login=login; state.domain=domain; state.expiresAt=Date.now()+15*60*1000; state.knownIds=new Set(); saveState(); showEmail(); startPolling();
-      }catch(err){ console.error(err); statusEl.textContent='Failed to generate. Try again.'; btnGenerate.disabled=false }
-    }
+    async function generateEmail(){ const chosen = domainSelect.value || DEFAULT_DOMAINS[0]; statusEl.textContent='Generating…'; btnGenerate.disabled=true; const alias = sanitizeAlias(aliasInput.value); chipAlias.textContent = `alias: ${alias||'n/a'}`; try{ const login = alias || randomLogin(); const domain = chosen; state.login=login; state.domain=domain; state.expiresAt=Date.now()+15*60*1000; state.knownIds=new Set(); saveState(); showEmail(); startPolling() }catch(err){ console.error(err); statusEl.textContent='Failed to generate. Try again.'; btnGenerate.disabled=false } }
 
-    async function fetchMessages(){
-      if(!state.login || !state.domain) return;
-      try{
-        if(state.mode==='demo' || demo.active) demo.tick();
-        const data = await apiGetMessages(state.login, state.domain);
-        state.inboxCache = Array.isArray(data)?data:[];
-        renderMessages(state.inboxCache);
-        lastCheck.textContent = `Last check: ${new Date().toLocaleTimeString()}`;
-        statusEl.textContent='';
-      }catch(e){ statusEl.textContent='Network blocked. Switched to demo mode.'; activateDemo() }
-    }
+    async function fetchMessages(){ if(!state.login || !state.domain) return; try{ if(state.mode==='demo' || demo.active) demo.tick(); const data = await apiGetMessages(state.login, state.domain); state.inboxCache = Array.isArray(data)?data:[]; renderMessages(state.inboxCache); lastCheck.textContent = `Last check: ${new Date().toLocaleTimeString()}`; statusEl.textContent='' }catch(e){ const msg = 'Network blocked on all paths. Use another mode, set a custom proxy, or enable Demo.'; showErrorBanner(msg+ (state.lastErrors.length?`\nDetails: ${state.lastErrors.join(' | ')}`:'')); if(autoDemoChk.checked){ activateDemo(); statusEl.textContent='Network blocked. Switched to demo mode.' } else { statusEl.textContent='Network blocked. Not switching to demo.' } } }
 
-    function renderMessages(list){
-      if(!list.length){ mailRows.innerHTML = '<tr><td colspan="5" class="empty">No messages yet.</td></tr>'; return }
-      list.sort((a,b)=>b.id-a.id); mailRows.innerHTML='';
-      for(const m of list){
-        const tr=document.createElement('tr');
-        const attach = (m.attachments&&m.attachments.length) ? `${m.attachments.length} file(s)` : '-';
-        tr.innerHTML = `
-          <td>${escapeHtml(m.from||'')}</td>
-          <td>${escapeHtml(m.subject||'')}</td>
-          <td>${escapeHtml(m.date||'')}</td>
-          <td>${attach}</td>
-          <td><button data-id="${m.id}">Open</button></td>`;
-        tr.querySelector('button').addEventListener('click',()=>openMessage(m.id));
-        mailRows.appendChild(tr);
-      }
-    }
+    function renderMessages(list){ if(!list.length){ mailRows.innerHTML = '<tr><td colspan="5" class="empty">No messages yet.</td></tr>'; return } list.sort((a,b)=>b.id-a.id); mailRows.innerHTML=''; for(const m of list){ const tr=document.createElement('tr'); const attach=(m.attachments&&m.attachments.length)?`${m.attachments.length} file(s)`:'-'; tr.innerHTML = `<td>${escapeHtml(m.from||'')}</td><td>${escapeHtml(m.subject||'')}</td><td>${escapeHtml(m.date||'')}</td><td>${attach}</td><td><button data-id="${m.id}">Open</button></td>`; tr.querySelector('button').addEventListener('click',()=>openMessage(m.id)); mailRows.appendChild(tr) } }
 
-    async function openMessage(id){
-      try{
-        const msg = await apiReadMessage(state.login, state.domain, id);
-        state.lastOpened = msg;
-        showModal(msg);
-      }catch(e){ alert('Failed to load message.') }
-    }
+    async function openMessage(id){ try{ const msg = await apiReadMessage(state.login, state.domain, id); state.lastOpened = msg; showModal(msg) }catch(e){ alert('Failed to load message.') } }
 
-    function showModal(msg){
-      modalSubject.textContent = msg.subject || '(no subject)';
-      modalFrom.textContent = `From: ${msg.from || ''}`;
-      modalContent.innerHTML='';
+    function showModal(msg){ modalSubject.textContent = msg.subject || '(no subject)'; modalFrom.textContent = `From: ${msg.from || ''}`; modalContent.innerHTML=''; const att = Array.isArray(msg.attachments)?msg.attachments:[]; if(att.length){ const wrap=document.createElement('div'); wrap.style.padding='10px 16px'; wrap.className='row'; wrap.style.flexWrap='wrap'; wrap.innerHTML='<span class="small">Attachments:</span>'; att.forEach(a=>{ const b=document.createElement('button'); b.textContent=`${a.filename||'file'} (${a.size?Math.round(a.size/1024)+' KB':''})`; b.title='Download attachment'; b.addEventListener('click',()=>downloadAttachment(msg,a.filename)); wrap.appendChild(b) }); modalContent.appendChild(wrap) } if(msg.htmlBody){ const iframe=document.createElement('iframe'); iframe.setAttribute('sandbox','allow-same-origin'); iframe.srcdoc=msg.htmlBody; modalContent.appendChild(iframe) } else if(msg.body){ const pre=document.createElement('pre'); pre.className='bodytext'; pre.textContent=msg.body; modalContent.appendChild(pre) } else if(msg.textBody){ const pre=document.createElement('pre'); pre.className='bodytext'; pre.textContent=msg.textBody; modalContent.appendChild(pre) } else { const pre=document.createElement('pre'); pre.className='bodytext'; pre.textContent='(No content)'; modalContent.appendChild(pre) } modal.classList.add('show') }
 
-      // attachments row (if any)
-      const att = Array.isArray(msg.attachments)?msg.attachments:[];
-      if(att.length){
-        const wrap = document.createElement('div');
-        wrap.style.padding = '10px 16px';
-        wrap.className = 'row';
-        wrap.style.flexWrap = 'wrap';
-        wrap.innerHTML = '<span class="small">Attachments:</span>';
-        att.forEach(a=>{
-          const b = document.createElement('button');
-          b.textContent = `${a.filename||'file'} (${a.size?Math.round(a.size/1024)+' KB':''})`;
-          b.title = 'Download attachment';
-          b.addEventListener('click',()=>downloadAttachment(msg, a.filename));
-          wrap.appendChild(b);
-        });
-        modalContent.appendChild(wrap);
-      }
-
-      if(msg.htmlBody){ const iframe=document.createElement('iframe'); iframe.setAttribute('sandbox','allow-same-origin'); iframe.srcdoc=msg.htmlBody; modalContent.appendChild(iframe); }
-      else if(msg.body){ const pre=document.createElement('pre'); pre.className='bodytext'; pre.textContent=msg.body; modalContent.appendChild(pre); }
-      else if(msg.textBody){ const pre=document.createElement('pre'); pre.className='bodytext'; pre.textContent=msg.textBody; modalContent.appendChild(pre); }
-      else { const pre=document.createElement('pre'); pre.className='bodytext'; pre.textContent='(No content)'; modalContent.appendChild(pre); }
-
-      modal.classList.add('show');
-    }
-
-    async function downloadAttachment(msg, filename){
-      try{
-        const blob = await apiDownloadAttachment(state.login, state.domain, msg.id, filename);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(()=>URL.revokeObjectURL(url), 1500);
-      }catch(e){ alert('Attachment download failed (CORS/proxy). Try another Access mode or Demo.') }
-    }
+    async function downloadAttachment(msg, filename){ try{ const blob = await apiDownloadAttachment(state.login, state.domain, msg.id, filename); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500) }catch(e){ alert('Attachment download failed (CORS/proxy). Try another Access mode or a custom proxy.') } }
 
     function hideModal(){ modal.classList.remove('show') }
 
-    function populateDomains(list){
-      domainSelect.innerHTML='';
-      for(const d of list){ const opt=document.createElement('option'); opt.value=d; opt.textContent=d; domainSelect.appendChild(opt) }
-      // include demo domain for offline
-      const demoOpt=document.createElement('option'); demoOpt.value='demo.local'; demoOpt.textContent='demo.local'; domainSelect.appendChild(demoOpt);
-    }
+    function populateDomains(list){ domainSelect.innerHTML=''; for(const d of list){ const opt=document.createElement('option'); opt.value=d; opt.textContent=d; domainSelect.appendChild(opt) } const demoOpt=document.createElement('option'); demoOpt.value='demo.local'; demoOpt.textContent='demo.local'; domainSelect.appendChild(demoOpt) }
 
-    function activateDemo(){ demo.active=true; state.mode='demo'; modeSelect.value='demo'; netBadge.textContent='Network: demo'; }
+    function activateDemo(){ demo.active=true; state.mode='demo'; modeSelect.value='demo'; netBadge.textContent='Network: demo'; hideErrorBanner() }
 
     // === Export helpers =======================================================
-    function downloadFile(name, mime, content){
-      const blob = new Blob([content], {type:mime});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(()=>URL.revokeObjectURL(url), 1500);
-    }
-
-    function buildEML(msg){
-      const headers = [
-        `From: ${msg.from||''}`,
-        `To: ${state.login}@${state.domain}`,
-        `Subject: ${msg.subject||''}`,
-        `Date: ${new Date().toUTCString()}`,
-        'MIME-Version: 1.0'
-      ];
-      const bodyText = msg.textBody || msg.body || '';
-      const html = msg.htmlBody || '';
-      if(html){
-        const boundary = '----=#Part_'+Math.random().toString(36).slice(2);
-        headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
-        return headers.join('\r\n')+`\r\n\r\n--${boundary}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${bodyText}\r\n--${boundary}\r\nContent-Type: text/html; charset=utf-8\r\n\r\n${html}\r\n--${boundary}--`;
-      } else {
-        headers.push('Content-Type: text/plain; charset=utf-8');
-        return headers.join('\r\n')+`\r\n\r\n${bodyText}`;
-      }
-    }
+    function downloadFile(name, mime, content){ const blob = new Blob([content], {type:mime}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500) }
+    function buildEML(msg){ const headers=[`From: ${msg.from||''}`,`To: ${state.login}@${state.domain}`,`Subject: ${msg.subject||''}`,`Date: ${new Date().toUTCString()}`,'MIME-Version: 1.0']; const bodyText=msg.textBody||msg.body||''; const html=msg.htmlBody||''; if(html){ const boundary='----=#Part_'+Math.random().toString(36).slice(2); headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`); return headers.join('\r\n')+`\r\n\r\n--${boundary}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${bodyText}\r\n--${boundary}\r\nContent-Type: text/html; charset=utf-8\r\n\r\n${html}\r\n--${boundary}--` } else { headers.push('Content-Type: text/plain; charset=utf-8'); return headers.join('\r\n')+`\r\n\r\n${bodyText}` } }
 
     // === Tests ================================================================
     const testOutput = el('testOutput');
     function logTest(line){ testOutput.innerHTML += `<div>${line}</div>` }
     function assertEqual(name, a, b){ const ok=JSON.stringify(a)===JSON.stringify(b); logTest(`${ok?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} ${name} → ${escapeHtml(JSON.stringify(a))}`); if(!ok) console.error('Test failed', name, a, b) }
     function assertMatch(name, str, re){ const ok = re.test(str); logTest(`${ok?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} ${name}`); if(!ok) console.error('Test failed', name, str) }
-    function runTests(){ testOutput.innerHTML='';
-      // formatTimeLeft
-      assertEqual('formatTimeLeft(0)', formatTimeLeft(0), '00:00');
-      assertEqual('formatTimeLeft(1000)', formatTimeLeft(1000), '00:01');
-      assertEqual('formatTimeLeft(59000)', formatTimeLeft(59000), '00:59');
-      assertEqual('formatTimeLeft(60000)', formatTimeLeft(60000), '01:00');
-      assertEqual('formatTimeLeft(90000)', formatTimeLeft(90000), '01:30');
-      // escapeHtml
-      assertEqual('escapeHtml("<&>\"\'")', escapeHtml('<&>"\''), '&lt;&amp;&gt;&quot;&#039;');
-      // randomLogin uniqueness/format
-      const samples = new Set(Array.from({length:200}, ()=>randomLogin()));
-      logTest(`${samples.size===200?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} randomLogin uniqueness (200)`);
-      const allValid = Array.from(samples).every(s=>/^u[a-z0-9]+$/.test(s));
-      logTest(`${allValid?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} randomLogin format`);
-      // sanitizeAlias
-      assertEqual('sanitizeAlias(" My Alias! ")', sanitizeAlias(' My Alias! '), 'myalias');
-      assertMatch('sanitizeAlias starts with letter', sanitizeAlias('1abc'), /^u/);
-      assertEqual('sanitizeAlias keeps dots/underscores', sanitizeAlias('a.b_c-1'), 'a.b_c-1');
-      assertEqual('sanitizeAlias removes @', sanitizeAlias('my@alias'), 'myalias');
-      // renderMessages (DOM smoke test)
-      renderMessages([{id:1,from:'a@b',subject:'hi',date:'now',attachments:[]}]);
-      const rowOk = !!$('#mailRows tr td');
-      logTest(`${rowOk?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} renderMessages DOM row`);
-      // EML builder
-      const eml = buildEML({from:'x@y',subject:'s',textBody:'t',htmlBody:'<b>h</b>'});
-      assertMatch('EML has headers', eml, /MIME-Version: 1.0/);
-      assertMatch('EML multipart boundary', eml, /multipart\/alternative/);
-      // filename sanitizer keeps @ and dots
-      const demoName = 'inbox_a@b.json'.replace(/[^a-z0-9._@-]+/gi,'_');
-      assertEqual('filename sanitize keeps @', demoName, 'inbox_a@b.json');
-      // Network test (non-fatal)
-      (async()=>{
-        try{ const domains = await apiGetDomains(); logTest(`<span class=ok>PASS</span> network test (${domains.length} domains)`); }
-        catch{ logTest('<span class=warn>WARN</span> network blocked; demo fallback will be used.') }
-      })();
-    }
+    function runTests(){ testOutput.innerHTML=''; assertEqual('formatTimeLeft(0)', formatTimeLeft(0), '00:00'); assertEqual('formatTimeLeft(1000)', formatTimeLeft(1000), '00:01'); assertEqual('formatTimeLeft(59000)', formatTimeLeft(59000), '00:59'); assertEqual('formatTimeLeft(60000)', formatTimeLeft(60000), '01:00'); assertEqual('formatTimeLeft(90000)', formatTimeLeft(90000), '01:30'); assertEqual('escapeHtml("<&>\"\'")', escapeHtml('<&>"\''), '&lt;&amp;&gt;&quot;&#039;'); const samples=new Set(Array.from({length:200},()=>randomLogin())); logTest(`${samples.size===200?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} randomLogin uniqueness (200)`); const allValid=Array.from(samples).every(s=>/^u[a-z0-9]+$/.test(s)); logTest(`${allValid?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} randomLogin format`); assertEqual('sanitizeAlias(" My Alias! ")', sanitizeAlias(' My Alias! '), 'myalias'); assertMatch('sanitizeAlias starts with letter', sanitizeAlias('1abc'), /^u/); assertEqual('sanitizeAlias keeps dots/underscores', sanitizeAlias('a.b_c-1'), 'a.b_c-1'); assertEqual('sanitizeAlias removes @', sanitizeAlias('my@alias'), 'myalias'); renderMessages([{id:1,from:'a@b',subject:'hi',date:'now',attachments:[]}]); const rowOk=!!$('#mailRows tr td'); logTest(`${rowOk?'<span class=ok>PASS</span>':'<span class=err>FAIL</span>'} renderMessages DOM row`); const eml=buildEML({from:'x@y',subject:'s',textBody:'t',htmlBody:'<b>h</b>'}); assertMatch('EML has headers', eml, /MIME-Version: 1.0/); assertMatch('EML multipart boundary', eml, /multipart\/alternative/); const demoName='inbox_a@b.json'.replace(/[^a-z0-9._@-]+/gi,'_'); assertEqual('filename sanitize keeps @', demoName, 'inbox_a@b.json'); // proxy URL building tests (no network)
+      const base='https://example.com/path?q=1'; assertEqual('proxy1 build', PROXIES.proxy1(base), 'https://cors.isomorphic-git.org/'+base); assertMatch('proxy2 build', PROXIES.proxy2(base), /^https:\/\/api\.allorigins\.win\/raw\?url=/); assertMatch('proxy3 build', PROXIES.proxy3(base), /^https:\/\/thingproxy\.freeboard\.io\/fetch\//); assertMatch('proxy4 build', PROXIES.proxy4(base), /^https:\/\/api\.codetabs\.com\/v1\/proxy\?quest=/); }
+
+    async function probe(){ testOutput.innerHTML += '<div>— Probing network paths…</div>'; const url = `${API_BASE}?action=getDomainList`; const order=['direct','proxy1','proxy2','proxy3','proxy4']; for(const k of order){ try{ const wrapped=PROXIES[k](url); const res=await fetch(wrapped,{cache:'no-store'}); logTest(`${res.ok?'<span class=ok>OK</span>':'<span class=err>FAIL</span>'} probe ${k} → ${res.status}`) }catch(e){ logTest(`<span class=err>FAIL</span> probe ${k} → ${e.message}`) } } }
 
     // === Boot & events ========================================================
-    btnGenerate.addEventListener('click', generateEmail);
-    btnReset.addEventListener('click', ()=>{ expireInbox(); btnGenerate.click() });
-    btnCopy.addEventListener('click', ()=>{ if(!state.login) return; navigator.clipboard.writeText(`${state.login}@${state.domain}`); statusEl.textContent='Copied!'; setTimeout(()=>statusEl.textContent='',1200) });
-    btnClose.addEventListener('click', hideModal);
-    modal.addEventListener('click', e=>{ if(e.target===modal) hideModal() });
-    el('btnRunTests').addEventListener('click', runTests);
+    btnGenerate.addEventListener('click', generateEmail); btnReset.addEventListener('click', ()=>{ expireInbox(); btnGenerate.click() }); btnCopy.addEventListener('click', ()=>{ if(!state.login) return; navigator.clipboard.writeText(`${state.login}@${state.domain}`); statusEl.textContent='Copied!'; setTimeout(()=>statusEl.textContent='',1200) }); btnClose.addEventListener('click', hideModal); modal.addEventListener('click', e=>{ if(e.target===modal) hideModal() }); el('btnRunTests').addEventListener('click', runTests); btnDownloadEML.addEventListener('click', ()=>{ if(!state.lastOpened) return; const eml=buildEML(state.lastOpened); const safeSub=(state.lastOpened.subject||'message').replace(/[^a-z0-9._-]+/gi,'_'); downloadFile(`${safeSub}.eml`, 'message/rfc822', eml) }); btnDownloadJSON.addEventListener('click', ()=>{ if(!state.lastOpened) return; const safeSub=(state.lastOpened.subject||'message').replace(/[^a-z0-9._-]+/gi,'_'); downloadFile(`${safeSub}.json`, 'application/json', JSON.stringify(state.lastOpened,null,2)) }); btnExportInbox.addEventListener('click', ()=>{ const name = `inbox_${state.login||'anon'}@${state.domain||'domain'}.json`.replace(/[^a-z0-9._@-]+/gi,'_'); downloadFile(name, 'application/json', JSON.stringify(state.inboxCache,null,2)) }); modeSelect.addEventListener('change',()=>{ state.mode = modeSelect.value; saveState(); if(state.mode==='demo'){ activateDemo() } else { demo.active=false; netBadge.textContent=`Network: ${state.mode}` } if(state.login) startPolling() }); aliasInput.addEventListener('input',()=>{ chipAlias.textContent = `alias: ${sanitizeAlias(aliasInput.value)||'n/a'}` }); customProxy.addEventListener('change', saveState); autoDemoChk.addEventListener('change', saveState); btnProbe.addEventListener('click', probe);
 
-    btnDownloadEML.addEventListener('click', ()=>{ if(!state.lastOpened) return; const eml = buildEML(state.lastOpened); const safeSub = (state.lastOpened.subject||'message').replace(/[^a-z0-9._-]+/gi,'_'); downloadFile(`${safeSub}.eml`, 'message/rfc822', eml) });
-    btnDownloadJSON.addEventListener('click', ()=>{ if(!state.lastOpened) return; const safeSub = (state.lastOpened.subject||'message').replace(/[^a-z0-9._-]+/gi,'_'); downloadFile(`${safeSub}.json`, 'application/json', JSON.stringify(state.lastOpened,null,2)) });
-    btnExportInbox.addEventListener('click', ()=>{ const name = `inbox_${state.login||'anon'}@${state.domain||'domain'}.json`.replace(/[^a-z0-9._@-]+/gi,'_'); downloadFile(name, 'application/json', JSON.stringify(state.inboxCache,null,2)) });
-
-    modeSelect.addEventListener('change',()=>{
-      state.mode = modeSelect.value; saveState();
-      if(state.mode==='demo'){ activateDemo() } else { demo.active=false; netBadge.textContent=`Network: ${state.mode}` }
-      if(state.login) startPolling();
-    });
-
-    aliasInput.addEventListener('input',()=>{ chipAlias.textContent = `alias: ${sanitizeAlias(aliasInput.value)||'n/a'}` });
-
-    (async function init(){
-      try{ populateDomains(await apiGetDomains()) }catch{ populateDomains(DEFAULT_DOMAINS) }
-      const s = loadState();
-      if(s){ state.mode=s.mode||'auto'; modeSelect.value=state.mode; if(state.mode==='demo') activateDemo(); }
-      const persisted = s && s.login && s.domain && s.expiresAt>Date.now();
-      if(persisted){ state.login=s.login; state.domain=s.domain; state.expiresAt=s.expiresAt; showEmail(); startPolling(); btnGenerate.disabled=true }
-      else { clearState(); updateTimer() }
-      setInterval(updateTimer, 500);
-      runTests();
-    })();
+    (async function init(){ try{ populateDomains(await apiGetDomains()) }catch{ populateDomains(DEFAULT_DOMAINS) } const s=loadState(); if(s){ state.mode=s.mode||'auto'; modeSelect.value=state.mode; if(s.customProxy) customProxy.value=s.customProxy; if(typeof s.autoDemo==='boolean') autoDemoChk.checked=s.autoDemo; if(state.mode==='demo') activateDemo() } const persisted = s && s.login && s.domain && s.expiresAt>Date.now(); if(persisted){ state.login=s.login; state.domain=s.domain; state.expiresAt=s.expiresAt; showEmail(); startPolling(); btnGenerate.disabled=true } else { clearState(); updateTimer() } setInterval(updateTimer, 500); runTests() })();
   </script>
 </body>
 </html>
